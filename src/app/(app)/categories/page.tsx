@@ -129,7 +129,7 @@ export default async function CategoriesPage() {
 function CategoryRow({ id, icon, name, count }: { id: string; icon: string | null; name: string; count: number }) {
   return (
     <div className="flex items-center gap-3 py-2.5">
-      <Link href={`/transactions?category=${id}`} className="flex flex-1 items-center gap-2 text-sm text-ink hover:text-accent">
+      <Link href={`/transactions?category=${id}&view=expense`} className="flex flex-1 items-center gap-2 text-sm text-ink hover:text-accent">
         <span>{icon}</span>
         <span>{name}</span>
         <span className="text-ink-faint">({count})</span>

@@ -63,7 +63,7 @@ export default async function CardReconciliationPage({ params }: { params: Promi
               </dl>
 
               <Link
-                href={`/transactions?account=card:${card.id}`}
+                href={`/transactions?account=card:${card.id}&view=expense`}
                 className="mt-3 inline-block text-sm font-semibold text-accent"
               >
                 כל עסקאות הכרטיס ←
