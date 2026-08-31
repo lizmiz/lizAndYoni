@@ -1,5 +1,6 @@
 import { listTransactions } from "@/lib/queries/transactions";
 import { prisma } from "@/lib/prisma";
+import { resolveScopeIds } from "@/lib/queries/dashboard";
 import { Card } from "@/components/ui/card";
 import { MonthNav } from "@/components/transactions/month-nav";
 import { TransactionContextMenu } from "@/components/transactions/context-menu";
@@ -7,6 +8,7 @@ import { formatILS, formatDateIL } from "@/lib/utils";
 import { TRANSACTION_VIEWS, type ScopeKeyParam, type TransactionViewKey } from "@/lib/nav";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { setDate, isSameMonth } from "date-fns";
 
 const EFFECT_LABEL: Record<string, string> = {
   REAL_INCOME: "הכנסה",
@@ -22,19 +24,79 @@ const EFFECT_LABEL: Record<string, string> = {
 
 type Tx = Awaited<ReturnType<typeof listTransactions>>[number];
 
+type DisplayItem = {
+  id: string;
+  transactionDate: Date;
+  amount: number;
+  economicEffect: string;
+  scope: { icon: string; name: string };
+  category: { id: string; name: string; icon: string | null } | null;
+  vendorName: string | null;
+  description: string | null;
+  isSynthetic: boolean;
+};
+
 function isExpectedStatus(t: Tx) {
   return t.status === "EXPECTED" || t.status === "PLANNED";
 }
 
-function groupByCategory(txs: Tx[]) {
-  const groups = new Map<string, { name: string; icon: string; total: number; items: Tx[] }>();
-  for (const t of txs) {
+function toDisplayItem(t: Tx): DisplayItem {
+  return {
+    id: t.id,
+    transactionDate: t.transactionDate,
+    amount: Number(t.amount),
+    economicEffect: t.economicEffect,
+    scope: t.scope,
+    category: t.category,
+    vendorName: t.vendor?.name ?? null,
+    description: t.description,
+    isSynthetic: false,
+  };
+}
+
+async function getUpcomingRecurringIncome(
+  scopeParam: ScopeKeyParam | undefined,
+  monthDate: Date
+): Promise<DisplayItem[]> {
+  const { scopeIds, scopes } = await resolveScopeIds(scopeParam);
+  const scopeById = new Map(scopes.map((s) => [s.id, s]));
+  const today = new Date();
+
+  const defs = await prisma.recurringDefinition.findMany({
+    where: {
+      scopeId: { in: scopeIds },
+      direction: "INCOME",
+      isActive: true,
+      expectedDay: { gte: today.getDate() },
+    },
+    include: { category: true },
+  });
+
+  return defs.map((d) => {
+    const scope = scopeById.get(d.scopeId)!;
+    return {
+      id: `recurring:${d.id}`,
+      transactionDate: setDate(monthDate, d.expectedDay),
+      amount: Number(d.amount),
+      economicEffect: "REAL_INCOME",
+      scope: { icon: scope.icon, name: scope.name },
+      category: d.category ? { id: d.category.id, name: d.category.name, icon: d.category.icon } : null,
+      vendorName: null,
+      description: `${d.name} (הכנסה קבועה)`,
+      isSynthetic: true,
+    };
+  });
+}
+
+function groupByCategory(items: DisplayItem[]) {
+  const groups = new Map<string, { name: string; icon: string; total: number; items: DisplayItem[] }>();
+  for (const t of items) {
     const key = t.category?.id ?? "none";
     const name = t.category?.name ?? "לא מסווג";
     const icon = t.category?.icon ?? "❓";
     if (!groups.has(key)) groups.set(key, { name, icon, total: 0, items: [] });
     const g = groups.get(key)!;
-    g.total += Number(t.amount);
+    g.total += t.amount;
     g.items.push(t);
   }
   return [...groups.values()].sort((a, b) => b.total - a.total);
@@ -72,22 +134,32 @@ export default async function TransactionsPage({
 
   // "הכנסות" = actually received only. "עתיד להיכנס" = still-pending income, kept entirely
   // separate so it never inflates the real income total. "הוצאות" = all expenses, any status.
-  let viewTxs: Tx[];
+  let viewItems: DisplayItem[];
   let tone: "income" | "expense";
   if (activeView === "income") {
-    viewTxs = transactions.filter((t) => t.direction === "INCOME" && !isExpectedStatus(t));
+    viewItems = transactions.filter((t) => t.direction === "INCOME" && !isExpectedStatus(t)).map(toDisplayItem);
     tone = "income";
   } else if (activeView === "expected") {
-    viewTxs = transactions.filter((t) => t.direction === "INCOME" && isExpectedStatus(t));
+    const flaggedItems = transactions
+      .filter((t) => t.direction === "INCOME" && isExpectedStatus(t))
+      .map(toDisplayItem);
+    // Still-pending income also lives as recurring definitions whose day hasn't come
+    // yet this month — the Dashboard's "צפוי להיכנס" figure already counts these, so
+    // this view should show the same items instead of staying empty until someone
+    // manually flags a transaction as pending.
+    const recurringItems = isSameMonth(monthDate, new Date())
+      ? await getUpcomingRecurringIncome(scope as ScopeKeyParam | undefined, monthDate)
+      : [];
+    viewItems = [...flaggedItems, ...recurringItems];
     tone = "income";
   } else {
-    viewTxs = transactions.filter((t) => t.direction === "EXPENSE");
+    viewItems = transactions.filter((t) => t.direction === "EXPENSE").map(toDisplayItem);
     tone = "expense";
   }
 
   const total = transactions.reduce((s, t) => s + (t.direction === "EXPENSE" ? -Number(t.amount) : Number(t.amount)), 0);
-  const viewTotal = viewTxs.reduce((s, t) => s + Number(t.amount), 0);
-  const groups = groupByCategory(viewTxs);
+  const viewTotal = viewItems.reduce((s, t) => s + t.amount, 0);
+  const groups = groupByCategory(viewItems);
   const toneClass = tone === "income" ? "text-income" : "text-expense";
 
   const qs = (v: string) => {
@@ -120,12 +192,12 @@ export default async function TransactionsPage({
       </div>
 
       <div className="flex items-center justify-between px-1 text-sm text-ink-soft">
-        <span>{viewTxs.length} תנועות</span>
+        <span>{viewItems.length} תנועות</span>
         <span className={`font-bold tabular-nums ${toneClass}`}>{formatILS(viewTotal)}</span>
       </div>
       <div className="px-1 text-xs text-ink-faint">מאזן כל התנועות בחודש (הכל): {formatILS(total)}</div>
 
-      {viewTxs.length === 0 ? (
+      {viewItems.length === 0 ? (
         <Card className="p-8 text-center text-ink-faint">אין תנועות בקטגוריה הזו החודש.</Card>
       ) : (
         <div className="flex flex-col gap-2">
@@ -141,24 +213,32 @@ export default async function TransactionsPage({
                   <span className={`font-semibold tabular-nums ${toneClass}`}>{formatILS(g.total)}</span>
                 </summary>
                 <div className="divide-y divide-line border-t border-line">
-                  {g.items.map((t) => (
-                    <TransactionContextMenu key={t.id} transactionId={t.id} categories={categoryOptions}>
-                      <Link href={`/transactions/${t.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2">
+                  {g.items.map((t) => {
+                    const row = (
+                      <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-ink">{t.vendor?.name ?? t.description ?? "ללא תיאור"}</div>
+                          <div className="truncate text-sm text-ink">{t.vendorName ?? t.description ?? "ללא תיאור"}</div>
                           <div className="truncate text-xs text-ink-faint">
                             {formatDateIL(t.transactionDate)} · {t.scope.icon} {t.scope.name}
                             {t.economicEffect !== "REAL_EXPENSE" && t.economicEffect !== "REAL_INCOME"
-                              ? ` · ${EFFECT_LABEL[t.economicEffect]}`
+                              ? ` · ${EFFECT_LABEL[t.economicEffect] ?? t.economicEffect}`
                               : ""}
                           </div>
                         </div>
                         <div className={`shrink-0 text-sm font-semibold tabular-nums ${toneClass}`}>
-                          {formatILS(Number(t.amount))}
+                          {formatILS(t.amount)}
                         </div>
-                      </Link>
-                    </TransactionContextMenu>
-                  ))}
+                      </div>
+                    );
+                    if (t.isSynthetic) {
+                      return <div key={t.id}>{row}</div>;
+                    }
+                    return (
+                      <TransactionContextMenu key={t.id} transactionId={t.id} categories={categoryOptions}>
+                        <Link href={`/transactions/${t.id}`}>{row}</Link>
+                      </TransactionContextMenu>
+                    );
+                  })}
                 </div>
               </details>
             </Card>
