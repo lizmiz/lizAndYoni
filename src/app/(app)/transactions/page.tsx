@@ -99,7 +99,7 @@ export default async function TransactionsPage({
         <Card className="p-8 text-center text-ink-faint">אין תנועות בחודש הזה.</Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <CategorySection title="הכנסות" txs={income} tone="income" categoryOptions={categoryOptions} groupBy="vendor" />
+          <CategorySection title="הכנסות" txs={income} tone="income" categoryOptions={categoryOptions} groupBy="category" />
           <CategorySection title="הוצאות" txs={expense} tone="expense" categoryOptions={categoryOptions} groupBy="category" />
         </div>
       )}
