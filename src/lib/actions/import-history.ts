@@ -154,6 +154,7 @@ export type HistoryImportResult = {
   tabsSkipped?: string[];
   imported?: number;
   duplicatesSkipped?: number;
+  statusFixed?: number;
   uncategorized?: number;
   byKind?: Record<string, number>;
 };
@@ -181,6 +182,7 @@ export async function importHistoricalLedger(_prev: HistoryImportResult, formDat
   const tabsSkipped: string[] = [];
   let imported = 0;
   let duplicatesSkipped = 0;
+  let statusFixed = 0;
   let uncategorized = 0;
   const byKind: Record<string, number> = {};
 
@@ -204,6 +206,12 @@ export async function importHistoricalLedger(_prev: HistoryImportResult, formDat
       const bankAccountId = meta.account === "shared" ? sharedAccount.id : yoniAccount.id;
 
       for (const item of block.items) {
+        // A row with no date in the source means the sheet's own green/orange
+        // convention marks it "still pending" — not yet actually received/paid.
+        // Must be captured before the fallback below replaces a missing date with
+        // an estimate, which would otherwise erase that signal.
+        const status: "ACTUAL" | "EXPECTED" = item.date ? "ACTUAL" : "EXPECTED";
+
         let date = item.date;
         if (!date || Math.abs(date.getTime() - tabFallbackDate.getTime()) > 45 * 86400000) {
           date = tabFallbackDate;
@@ -232,6 +240,10 @@ export async function importHistoricalLedger(_prev: HistoryImportResult, formDat
         });
         if (existingTx) {
           duplicatesSkipped++;
+          if (existingTx.status !== status) {
+            await prisma.transaction.update({ where: { id: existingTx.id }, data: { status } });
+            statusFixed++;
+          }
           continue;
         }
 
@@ -241,7 +253,7 @@ export async function importHistoricalLedger(_prev: HistoryImportResult, formDat
             amount: item.amount,
             direction: meta.direction,
             economicEffect: meta.effect,
-            status: "ACTUAL",
+            status,
             scopeId: scope.id,
             bankAccountId,
             vendorId: vendor.id,
@@ -265,6 +277,7 @@ export async function importHistoricalLedger(_prev: HistoryImportResult, formDat
     tabsSkipped,
     imported,
     duplicatesSkipped,
+    statusFixed,
     uncategorized,
     byKind,
   };

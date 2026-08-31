@@ -49,6 +49,8 @@ export function HistoryUploadForm() {
             <dd className="text-ink">{state.imported}</dd>
             <dt className="text-ink-faint">כפילויות שדולגו</dt>
             <dd className="text-ink">{state.duplicatesSkipped}</dd>
+            <dt className="text-ink-faint">סטטוס תוקן (התקבל/צפוי)</dt>
+            <dd className="text-ink">{state.statusFixed}</dd>
             <dt className="text-ink-faint">דורשות סיווג</dt>
             <dd className="text-ink">{state.uncategorized}</dd>
           </dl>
