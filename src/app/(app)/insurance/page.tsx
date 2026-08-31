@@ -2,8 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatILS, formatDateIL } from "@/lib/utils";
-import { createInsurancePolicy, deleteInsurancePolicy } from "@/lib/actions/insurance";
-import { AlertTriangle } from "lucide-react";
+import { createInsurancePolicy, deleteInsurancePolicy, acceptInsuranceSuggestion } from "@/lib/actions/insurance";
+import { getInsuranceSuggestions } from "@/lib/queries/insurance-suggestions";
+import { AlertTriangle, Sparkles } from "lucide-react";
 
 const FREQ_LABEL: Record<string, string> = {
   WEEKLY: "שבועי",
@@ -18,9 +19,10 @@ async function handleCreate(formData: FormData) {
 }
 
 export default async function InsurancePage() {
-  const [policies, users] = await Promise.all([
+  const [policies, users, suggestions] = await Promise.all([
     prisma.insurancePolicy.findMany({ include: { insuredUser: true }, orderBy: { renewalDate: "asc" } }),
     prisma.user.findMany(),
+    getInsuranceSuggestions(),
   ]);
 
   const in30Days = new Date();
@@ -29,6 +31,38 @@ export default async function InsurancePage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 py-4">
       <h1 className="text-xl font-bold text-ink">ביטוחים</h1>
+
+      {suggestions.length > 0 && (
+        <Card className="p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-gold" />
+            <h2 className="font-bold text-ink">זוהו אוטומטית מהתנועות</h2>
+          </div>
+          <p className="mb-3 text-xs text-ink-faint">
+            ספקים שחוזרים על עצמם ונראים כמו ביטוח, לפי ההיסטוריה שיובאה. לחיצה על הוספה יוצרת רשומת פוליסה
+            (אפשר לתקן פרטים אחר כך).
+          </p>
+          <div className="flex flex-col gap-2">
+            {suggestions.map((s) => (
+              <div key={`${s.company}-${s.type}`} className="flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-ink">
+                    {s.company} · {s.type}
+                  </div>
+                  <div className="text-xs text-ink-faint">
+                    {formatILS(s.cost)} · הופיע {s.occurrences} פעמים · {s.sampleVendorNames.join(", ")}
+                  </div>
+                </div>
+                <form action={acceptInsuranceSuggestion.bind(null, s.company, s.type, s.cost)}>
+                  <Button type="submit" size="sm" variant="outline">
+                    הוספה
+                  </Button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="flex flex-col gap-3">
         {policies.map((p) => {

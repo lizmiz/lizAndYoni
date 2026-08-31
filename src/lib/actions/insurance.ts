@@ -40,3 +40,16 @@ export async function deleteInsurancePolicy(id: string) {
   await prisma.insurancePolicy.delete({ where: { id } });
   revalidatePath("/insurance");
 }
+
+export async function acceptInsuranceSuggestion(company: string, type: string, cost: number) {
+  await prisma.insurancePolicy.create({
+    data: {
+      company,
+      type,
+      cost,
+      paymentFrequency: "MONTHLY",
+      notes: "זוהה אוטומטית מהיסטוריית התנועות — כדאי לוודא תדירות תשלום ותאריך חידוש.",
+    },
+  });
+  revalidatePath("/insurance");
+}
