@@ -1,0 +1,437 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth.js (NextAuth v5) — Google login, 2 allowlisted accounts
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+
+  accounts Account[]
+  sessions Session[]
+
+  investmentAccounts InvestmentAccount[]
+  insurancePolicies  InsurancePolicy[]
+  ownedScopes        FinancialScope[]
+
+  createdAt DateTime @default(now())
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Core lookup / structural entities
+// ─────────────────────────────────────────────────────────────
+
+enum ScopeKey {
+  HOME
+  LIZMIZ
+  YONI
+}
+
+/// שיוך פיננסי: בית / ליזמיז / יוני
+model FinancialScope {
+  id      String   @id @default(cuid())
+  key     ScopeKey @unique
+  name    String
+  icon    String
+  ownerId String?
+  owner   User?    @relation(fields: [ownerId], references: [id])
+
+  bankAccounts        BankAccount[]
+  transactions        Transaction[]
+  recurringDefinitions RecurringDefinition[]
+  vendorDefaults      Vendor[]
+  insights            Insight[]
+  installmentGroups   InstallmentGroup[]
+  assets              Asset[]
+  liabilities         Liability[]
+
+  createdAt DateTime @default(now())
+}
+
+/// חשבון בנק — נפרד משיוך פיננסי (חשבון יכול לשרת כמה שיוכים)
+model BankAccount {
+  id          String  @id @default(cuid())
+  name        String
+  bankName    String
+  last4       String?
+  currency    String  @default("ILS")
+  isActive    Boolean @default(true)
+  currentBalance Decimal? @db.Decimal(14, 2)
+  balanceAsOf    DateTime?
+  primaryScopeId String?
+  primaryScope   FinancialScope? @relation(fields: [primaryScopeId], references: [id])
+
+  creditCards  CreditCard[]
+  transactions Transaction[]
+  recurringDefinitions RecurringDefinition[]
+
+  createdAt DateTime @default(now())
+}
+
+/// כרטיס אשראי — מחויב מחשבון בנק, אך העסקאות שלו מפורטות בנפרד
+model CreditCard {
+  id            String   @id @default(cuid())
+  name          String
+  network       String? // MAX / CAL / Isracard / Leumi Card...
+  last4         String
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+  ownerUserId   String?
+
+  transactions      Transaction[]
+  installmentGroups InstallmentGroup[]
+  statements        CreditCardStatement[]
+
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+}
+
+/// קטגוריה — עץ היררכי, גמיש (הוספה/מיזוג/ארכוב)
+model Category {
+  id       String    @id @default(cuid())
+  name     String
+  icon     String?
+  color    String?
+  parentId String?
+  parent   Category? @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+
+  isArchived Boolean @default(false)
+
+  transactions Transaction[]
+  vendorDefaults Vendor[]
+  recurringDefinitions RecurringDefinition[]
+  installmentGroups InstallmentGroup[]
+
+  createdAt DateTime @default(now())
+
+  @@index([parentId])
+}
+
+/// ספק / לקוח — עם למידת שיוך וקטגוריה מברירת מחדל
+model Vendor {
+  id                String   @id @default(cuid())
+  name              String
+  normalizedName    String   @unique
+  defaultCategoryId String?
+  defaultCategory   Category? @relation(fields: [defaultCategoryId], references: [id])
+  defaultScopeId    String?
+  defaultScope      FinancialScope? @relation(fields: [defaultScopeId], references: [id])
+  isLearned         Boolean  @default(false)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+}
+
+enum RecurrenceFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum TransactionDirection {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+/// הכנסה / הוצאה קבועה — תבנית, לא תנועה בפועל
+model RecurringDefinition {
+  id            String   @id @default(cuid())
+  name          String
+  amount        Decimal  @db.Decimal(12, 2)
+  direction     TransactionDirection
+  expectedDay   Int // 1-31
+  frequency     RecurrenceFrequency @default(MONTHLY)
+
+  scopeId       String
+  scope         FinancialScope @relation(fields: [scopeId], references: [id])
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  isActive  Boolean  @default(true)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+}
+
+/// קבוצת תשלומים — מפרידה שווי רכישה מהשפעת תזרים חודשית
+model InstallmentGroup {
+  id              String  @id @default(cuid())
+  purchaseTotal   Decimal @db.Decimal(12, 2)
+  purchaseDate    DateTime
+  installmentsCount Int
+  monthlyAmount   Decimal @db.Decimal(12, 2)
+
+  vendorName   String
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  scopeId      String
+  scope        FinancialScope @relation(fields: [scopeId], references: [id])
+  creditCardId String?
+  creditCard   CreditCard? @relation(fields: [creditCardId], references: [id])
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+}
+
+enum StatementStatus {
+  MATCHED
+  PARTIAL
+  UNMATCHED
+}
+
+/// חיוב חודשי של כרטיס אשראי + סטטוס התאמה (Reconciliation)
+model CreditCardStatement {
+  id                 String   @id @default(cuid())
+  creditCardId       String
+  creditCard         CreditCard @relation(fields: [creditCardId], references: [id])
+  period             String // "2026-09"
+  billedAmount       Decimal  @db.Decimal(12, 2)
+  matchedAmount      Decimal  @db.Decimal(12, 2) @default(0)
+  transactionsCount  Int      @default(0)
+  uncategorizedCount Int      @default(0)
+  status             StatementStatus @default(UNMATCHED)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([creditCardId, period])
+}
+
+enum EconomicEffect {
+  REAL_INCOME // הכנסה אמיתית
+  REAL_EXPENSE // הוצאה אמיתית
+  SAVINGS_INVESTMENT // חיסכון / השקעה
+  ACCOUNT_TRANSFER // העברה בין חשבונות
+  REFUND // החזר
+  CLIENT_EXPENSE // הוצאה עבור לקוח
+  CLIENT_REIMBURSEMENT // כסף שהתקבל עבור הוצאות לקוח
+  TAX // מס
+  OTHER // תנועה אחרת
+}
+
+enum TransactionStatus {
+  PLANNED // מתוכנן
+  EXPECTED // צפוי
+  ACTUAL // בפועל
+  RECONCILED // מותאם
+}
+
+enum DataSource {
+  MANUAL
+  CSV
+  EXCEL
+  PDF
+  BANK
+  CREDIT_COMPANY
+  EMAIL
+  INVOICE
+  API
+}
+
+/// תנועה — הליבה של המערכת
+model Transaction {
+  id              String   @id @default(cuid())
+  transactionDate DateTime
+  chargeDate      DateTime?
+  amount          Decimal  @db.Decimal(12, 2)
+  currency        String   @default("ILS")
+  originalAmount  Decimal? @db.Decimal(12, 2)
+  originalCurrency String?
+  exchangeRate    Decimal? @db.Decimal(10, 4)
+
+  direction      TransactionDirection
+  economicEffect EconomicEffect
+  status         TransactionStatus @default(ACTUAL)
+
+  scopeId       String
+  scope         FinancialScope @relation(fields: [scopeId], references: [id])
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+  creditCardId  String?
+  creditCard    CreditCard? @relation(fields: [creditCardId], references: [id])
+  vendorId      String?
+  vendor        Vendor? @relation(fields: [vendorId], references: [id])
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+
+  description String?
+  notes       String?
+
+  isRecurring          Boolean @default(false)
+  recurringDefinitionId String?
+  recurringDefinition   RecurringDefinition? @relation(fields: [recurringDefinitionId], references: [id])
+
+  installmentGroupId String?
+  installmentGroup   InstallmentGroup? @relation(fields: [installmentGroupId], references: [id])
+  installmentNumber  Int?
+
+  statementId String?
+  statement   CreditCardStatement? @relation(fields: [statementId], references: [id])
+
+  linkedTransactionId String?  @unique
+  linkedTransaction   Transaction? @relation("TransactionLink", fields: [linkedTransactionId], references: [id])
+  linkedFrom          Transaction? @relation("TransactionLink")
+
+  vatAmount     Decimal? @db.Decimal(12, 2)
+  invoiceNumber String?
+
+  source        DataSource @default(MANUAL)
+  attachmentId  String?
+  attachment    Attachment? @relation(fields: [attachmentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scopeId, transactionDate])
+  @@index([categoryId])
+  @@index([vendorId])
+  @@index([creditCardId])
+  @@index([bankAccountId])
+}
+
+model Attachment {
+  id              String   @id @default(cuid())
+  fileUrl         String
+  fileType        String
+  originalFilename String?
+  uploadedAt      DateTime @default(now())
+
+  transactions      Transaction[]
+  insurancePolicies InsurancePolicy[]
+}
+
+/// השקעות וחסכונות — בסיסי, ידני
+model InvestmentAccount {
+  id              String   @id @default(cuid())
+  name            String
+  ownerUserId     String?
+  ownerUser       User?    @relation(fields: [ownerUserId], references: [id])
+  provider        String
+  productType     String // פנסיה / קרן השתלמות / תיק השקעות / חיסכון לילדים / אחר
+  track           String?
+  monthlyDeposit  Decimal? @db.Decimal(12, 2)
+  balance         Decimal  @db.Decimal(14, 2)
+  managementFee   Decimal? @db.Decimal(6, 3)
+  returnRate      Decimal? @db.Decimal(6, 3)
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// ביטוחים — בסיסי
+model InsurancePolicy {
+  id             String   @id @default(cuid())
+  insuredUserId  String?
+  insuredUser    User?    @relation(fields: [insuredUserId], references: [id])
+  company        String
+  type           String // בריאות / חיים / סיעודי / אובדן כושר עבודה / דירה / רכב / עסק / אחר
+  cost           Decimal  @db.Decimal(12, 2)
+  paymentFrequency RecurrenceFrequency @default(MONTHLY)
+  renewalDate    DateTime?
+  policyNumber   String?
+  attachmentId   String?
+  attachment     Attachment? @relation(fields: [attachmentId], references: [id])
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// תובנה — לוג של תובנות שנוצרו (חוקיות + AI)
+model Insight {
+  id            String   @id @default(cuid())
+  generatedAt   DateTime @default(now())
+  type          String
+  text          String
+  severity      String   @default("info") // info / warning / critical
+  scopeId       String?
+  scope         FinancialScope? @relation(fields: [scopeId], references: [id])
+  dataSnapshot  Json?
+  isDismissed   Boolean  @default(false)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2/3 placeholders — schema ready, not built yet
+// ─────────────────────────────────────────────────────────────
+
+model Asset {
+  id            String   @id @default(cuid())
+  type          String // דירה / רכב / יתרת בנק / השקעה / אחר
+  name          String
+  scopeId       String
+  scope         FinancialScope @relation(fields: [scopeId], references: [id])
+  value         Decimal  @db.Decimal(14, 2)
+  valuationDate DateTime @default(now())
+  notes         String?
+
+  createdAt DateTime @default(now())
+}
+
+model Liability {
+  id             String   @id @default(cuid())
+  type           String // משכנתא / הלוואה / חוב
+  name           String
+  scopeId        String
+  scope          FinancialScope @relation(fields: [scopeId], references: [id])
+  balance        Decimal  @db.Decimal(14, 2)
+  monthlyPayment Decimal? @db.Decimal(12, 2)
+  notes          String?
+
+  createdAt DateTime @default(now())
+}
