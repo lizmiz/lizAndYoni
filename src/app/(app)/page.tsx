@@ -16,7 +16,7 @@ export default async function DashboardPage({
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 py-4">
       {/* KPI row */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi
           label="יתרה נוכחית"
           value={data.currentBalance}
@@ -29,7 +29,7 @@ export default async function DashboardPage({
       </div>
 
       {/* Month summary */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SubStat label="הכנסות החודש" value={data.monthActualIncome} />
         <SubStat label="הוצאות החודש" value={data.monthActualExpense} />
         <SubStat label="מאזן החודש" value={data.monthBalance} signed />

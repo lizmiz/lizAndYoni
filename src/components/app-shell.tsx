@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { QuickAddProvider, useQuickAdd } from "@/components/quick-add/context";
 import { QuickAddDialog } from "@/components/quick-add/dialog";
+import { ToastProvider } from "@/components/toast/context";
 import type { ReferenceData } from "@/lib/queries/reference";
 
 export function AppShell({
@@ -21,6 +22,7 @@ export function AppShell({
   referenceData: ReferenceData;
 }) {
   return (
+    <ToastProvider>
     <QuickAddProvider referenceData={referenceData}>
       <div className="flex min-h-screen w-full">
         <NavSidebar user={user} />
@@ -43,6 +45,7 @@ export function AppShell({
       </div>
       <QuickAddDialog />
     </QuickAddProvider>
+    </ToastProvider>
   );
 }
 

@@ -22,7 +22,7 @@ export default async function InvestmentsPage() {
     <div className="mx-auto flex max-w-2xl flex-col gap-4 py-4">
       <h1 className="text-xl font-bold text-ink">השקעות וחסכונות</h1>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card className="p-4">
           <div className="text-xs text-ink-faint">סך היתרות</div>
           <div className="mt-1 text-xl font-bold tabular-nums text-accent">{formatILS(totalBalance)}</div>

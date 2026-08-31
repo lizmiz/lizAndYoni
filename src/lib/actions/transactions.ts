@@ -85,6 +85,34 @@ export async function deleteTransaction(id: string) {
   revalidatePath("/transactions");
 }
 
+/**
+ * Quick recategorize (right-click on a transaction row). Beyond updating the one
+ * transaction, this teaches the vendor's default category going forward AND backfills
+ * every other still-uncategorized transaction from the same vendor — past and future
+ * imports both benefit, matching how vendor learning already works for quick-add.
+ * Never touches a transaction that already has a different category someone chose on
+ * purpose.
+ */
+export async function recategorizeTransaction(transactionId: string, categoryId: string) {
+  const tx = await prisma.transaction.findUniqueOrThrow({ where: { id: transactionId } });
+
+  await prisma.transaction.update({ where: { id: transactionId }, data: { categoryId } });
+
+  let backfilled = 0;
+  if (tx.vendorId) {
+    await prisma.vendor.update({ where: { id: tx.vendorId }, data: { defaultCategoryId: categoryId, isLearned: true } });
+    const result = await prisma.transaction.updateMany({
+      where: { vendorId: tx.vendorId, categoryId: null, id: { not: transactionId } },
+      data: { categoryId },
+    });
+    backfilled = result.count;
+  }
+
+  revalidatePath("/");
+  revalidatePath("/transactions");
+  return { ok: true as const, backfilled };
+}
+
 const updateSchema = z.object({
   id: z.string().min(1),
   categoryId: z.string().min(1),

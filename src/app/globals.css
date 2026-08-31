@@ -43,6 +43,10 @@
   --font-sans: var(--font-heebo);
 }
 
+html {
+  font-size: 130%;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
