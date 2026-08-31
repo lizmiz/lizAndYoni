@@ -9,16 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { QuickAddProvider, useQuickAdd } from "@/components/quick-add/context";
 import { QuickAddDialog } from "@/components/quick-add/dialog";
+import type { ReferenceData } from "@/lib/queries/reference";
 
 export function AppShell({
   user,
   children,
+  referenceData,
 }: {
   user: Session["user"] | undefined;
   children: ReactNode;
+  referenceData: ReferenceData;
 }) {
   return (
-    <QuickAddProvider>
+    <QuickAddProvider referenceData={referenceData}>
       <div className="flex min-h-screen w-full">
         <NavSidebar user={user} />
         <div className="flex min-w-0 flex-1 flex-col">
